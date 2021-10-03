@@ -1,5 +1,6 @@
 use rocket::serde::json::Json;
 use rocket::*;
+use score::GameScore;
 use sqlx::Row;
 
 mod score;
@@ -8,7 +9,8 @@ mod tests;
 
 #[derive(Debug)]
 pub enum RequestError {
-    GameExists { game_name: String },
+    GameAlreadyExists { game_name: String },
+    NoSuchGame { game_name: String },
 }
 
 impl std::error::Error for RequestError {}
@@ -16,9 +18,14 @@ impl std::error::Error for RequestError {}
 impl std::fmt::Display for RequestError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::GameExists { game_name } => write!(
+            Self::GameAlreadyExists { game_name } => write!(
                 f,
                 "a game called {} already exists in the database",
+                game_name
+            ),
+            RequestError::NoSuchGame { game_name } => write!(
+                f,
+                "no game with the name {} exists in the database",
                 game_name
             ),
         }
@@ -44,7 +51,10 @@ async fn rocket() -> _ {
 
     // Build the rocket
     rocket::build()
-        .mount("/", routes![index, check_game, add_game, delete_game])
+        .mount(
+            "/",
+            routes![index, check_game, add_game, delete_game, add_score],
+        )
         .manage::<DatabasePool>(database_pool)
 }
 
@@ -56,10 +66,7 @@ fn index() -> &'static str {
 /// Checks whether a game called `game_name` is registered in the database.
 /// Returns Some(game_id) if it does, else None.
 #[get("/games/<game_name>", format = "json")]
-pub async fn check_game(
-    game_name: &str,
-    database: &State<DatabasePool>,
-) -> RequestResult<Json<Option<GameId>>> {
+pub async fn check_game(game_name: &str, database: &State<DatabasePool>) -> Json<Option<GameId>> {
     // Check that a game with such name does not exist
     let response = sqlx::query(&format!(
         "SELECT game_id FROM games WHERE game_name = \'{}\'",
@@ -69,9 +76,7 @@ pub async fn check_game(
     .await
     .unwrap();
 
-    Ok(Json(
-        response.map(|row| row.get_unchecked::<GameId, usize>(0)),
-    ))
+    Json(response.map(|row| row.get_unchecked::<GameId, usize>(0)))
 }
 
 /// Attempts to add a new game called `game_name` into the database.
@@ -85,9 +90,9 @@ pub async fn add_game(
     let game_name = game_name.0;
 
     // Check that a game with such name does not exist
-    let check = check_game(&game_name, database).await.unwrap();
+    let check = check_game(&game_name, database).await;
     if check.is_some() {
-        return Err(RequestError::GameExists { game_name }.into());
+        return Err(RequestError::GameAlreadyExists { game_name }.into());
     }
 
     // Insert
@@ -138,4 +143,37 @@ pub async fn delete_game(
 
     let rows_affected = response.rows_affected();
     Ok(Json(Some(rows_affected)))
+}
+
+/// Adds score to the database under game called `game_name`
+#[post("/games/<game_name>", format = "json", data = "<score>")]
+pub async fn add_score(
+    game_name: &str,
+    score: Json<GameScore>,
+    database: &State<DatabasePool>,
+) -> RequestResult<()> {
+    let score = score.0;
+
+    // Get game's id
+    let response = check_game(game_name, database).await;
+    let game_id = match response.0 {
+        Some(game_id) => game_id,
+        None => {
+            return Err(RequestError::NoSuchGame {
+                game_name: game_name.to_owned(),
+            }
+            .into())
+        }
+    };
+
+    // Insert score
+    sqlx::query(&format!(
+        "INSERT INTO scores (game_id, score) VALUES ({}, {})",
+        game_id, score.score
+    ))
+    .execute(database.inner())
+    .await
+    .unwrap();
+
+    Ok(())
 }
