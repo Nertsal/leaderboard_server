@@ -3,7 +3,7 @@ use rocket::{
     local::asynchronous::{Client, LocalResponse},
 };
 
-use crate::{score::ScoreRecord, GameId};
+use crate::database::{GameId, ScoreRecord};
 
 async fn spawn_client() -> Client {
     Client::tracked(super::rocket().await)
