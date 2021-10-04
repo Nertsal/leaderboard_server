@@ -127,6 +127,10 @@ async fn create_delete_game() {
     // Delete the game
     let response = delete_game(&client, &game_name).await;
     assert_eq!(response, Ok(0));
+
+    // Check that the game was deleted
+    let response = check_game(&client, &game_name).await;
+    assert!(response.is_err());
 }
 
 /// Creates a game, adds score, and deletes the game from the database
@@ -165,16 +169,23 @@ async fn create_add_get_delete_game() {
     let response = check_game(&client, &game_name).await;
     assert_eq!(response, Ok(game_id));
 
-    // Add score
-    let score_record = ScoreRecord { score: 10 };
-    let response = add_score(&client, &game_name, &score_record).await;
-    assert!(response.is_ok());
+    // Add scores
+    let scores = vec![
+        ScoreRecord { score: 10 },
+        ScoreRecord { score: -5 },
+        ScoreRecord { score: 31 },
+    ];
+    let scores_len = scores.len();
+    for score_record in &scores {
+        let response = add_score(&client, &game_name, &score_record).await;
+        assert!(response.is_ok());
+    }
 
     // Fetch score
-    let scores = get_scores(&client, &game_name).await;
-    assert_eq!(scores, Ok(vec![score_record]));
+    let response = get_scores(&client, &game_name).await;
+    assert_eq!(response, Ok(scores));
 
     // Delete the game
     let response = delete_game(&client, &game_name).await;
-    assert_eq!(response, Ok(1));
+    assert_eq!(response, Ok(scores_len as u64));
 }
