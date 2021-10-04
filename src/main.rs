@@ -73,7 +73,7 @@ fn index() -> &'static str {
 }
 
 /// Checks whether a game called `game_name` is registered in the database.
-/// Returns Ok(game_id) if it does, else Err(_).
+/// Returns Ok(game_id) if it does, otherwise returns an error.
 #[get("/games/<game_name>", format = "json")]
 pub async fn check_game(
     game_name: &str,
@@ -132,7 +132,7 @@ pub async fn add_game(
 /// Attempts to delete a game called `game_name` from the `games` table
 /// and all scores for that game from the `scores` table if such game is registered.
 /// If such game was present in the database, returns the number of scores removed,
-/// otherwise returns None.
+/// otherwise returns an error.
 #[delete("/games/<game_name>")]
 pub async fn delete_game(
     game_name: &str,
@@ -168,7 +168,8 @@ pub async fn delete_game(
     Ok(Json(rows_affected))
 }
 
-/// Adds score to the database under game called `game_name`
+/// Adds score to the database under game called `game_name`ю
+/// Returns an error if a game with such name already existed.
 #[post("/games/<game_name>/scores", format = "json", data = "<score_record>")]
 pub async fn add_score(
     game_name: &str,
