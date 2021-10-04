@@ -1,6 +1,8 @@
 use rocket::*;
 
 mod database;
+mod database_keys;
+
 #[cfg(test)]
 mod tests;
 
@@ -24,8 +26,7 @@ async fn rocket() -> _ {
             "/",
             routes![
                 index,
-                requests::check_game,
-                requests::add_game,
+                requests::create_game,
                 requests::delete_game,
                 requests::add_score,
                 requests::get_scores

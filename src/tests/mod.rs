@@ -1,9 +1,12 @@
 use rocket::{
-    http::Status,
+    http::{Header, Status},
     local::asynchronous::{Client, LocalResponse},
 };
 
-use crate::database::{GameId, ScoreRecord};
+use crate::{
+    database::{GameId, ScoreRecord},
+    database_keys::GameKeys,
+};
 
 async fn spawn_client() -> Client {
     Client::tracked(super::rocket().await)
@@ -18,36 +21,29 @@ async fn deserialize_response<'a, T: rocket::serde::DeserializeOwned>(
     rocket::serde::json::serde_json::from_str(&string)
 }
 
-/// Checks whether a game called `game_name` exists in the database
-/// and return Some(game_id) if it does.
-async fn check_game(client: &Client, game_name: &str) -> Result<GameId, String> {
-    let uri = format!("/games/{}", game_name);
-    let response = client.get(&uri).dispatch().await;
-    if response.status() != Status::Ok {
-        return Err(response.into_string().await.unwrap());
-    }
-
-    let game_id = deserialize_response::<GameId>(response).await.unwrap();
-    Ok(game_id)
-}
-
 /// Creates a new game called `game_name` in the database
 /// and returns its generated id
-async fn create_game(client: &Client, game_name: &String) -> Result<GameId, String> {
+async fn create_game(client: &Client, game_name: &String) -> Result<(GameId, GameKeys), String> {
     let response = client.post("/games").json(game_name).dispatch().await;
     if response.status() != Status::Ok {
         return Err(response.into_string().await.unwrap());
     }
 
-    let game_id = deserialize_response::<GameId>(response).await.unwrap();
-    Ok(game_id)
+    let result = deserialize_response::<(GameId, GameKeys)>(response)
+        .await
+        .unwrap();
+    Ok(result)
 }
 
 /// Deletes a game called `game_name` from the database
 /// and returns whether it was in the database
-async fn delete_game(client: &Client, game_name: &str) -> Result<u64, String> {
+async fn delete_game(client: &Client, game_name: &str, api_key: &str) -> Result<u64, String> {
     let uri = format!("/games/{}", game_name);
-    let response = client.delete(&uri).dispatch().await;
+    let response = client
+        .delete(&uri)
+        .header(Header::new("api-key", api_key.to_owned()))
+        .dispatch()
+        .await;
     if response.status() != Status::Ok {
         return Err(response.into_string().await.unwrap());
     }
@@ -62,9 +58,15 @@ async fn add_score(
     client: &Client,
     game_name: &str,
     score_record: &ScoreRecord,
+    api_key: &str,
 ) -> Result<(), String> {
     let uri = format!("/games/{}/scores", game_name);
-    let response = client.post(&uri).json(score_record).dispatch().await;
+    let response = client
+        .post(&uri)
+        .header(Header::new("api-key", api_key.to_owned()))
+        .json(score_record)
+        .dispatch()
+        .await;
     if response.status() != Status::Ok {
         return Err(response.into_string().await.unwrap());
     }
@@ -72,9 +74,18 @@ async fn add_score(
     Ok(())
 }
 
-async fn get_scores(client: &Client, game_name: &str) -> Result<Vec<ScoreRecord>, String> {
+/// Gets scores from the database under game called `game_name`.
+async fn get_scores(
+    client: &Client,
+    game_name: &str,
+    api_key: &str,
+) -> Result<Vec<ScoreRecord>, String> {
     let uri = format!("/games/{}/scores", game_name);
-    let response = client.get(&uri).dispatch().await;
+    let response = client
+        .get(&uri)
+        .header(Header::new("api-key", api_key.to_owned()))
+        .dispatch()
+        .await;
     if response.status() != Status::Ok {
         return Err(response.into_string().await.unwrap());
     }
@@ -87,30 +98,6 @@ async fn get_scores(client: &Client, game_name: &str) -> Result<Vec<ScoreRecord>
 
 const TEST_GAME_NAME: &'static str = "test_game";
 
-/// Checks that a game called `TEST_GAME_NAME` does not exist.
-/// It it does exist, then all other tests must fail,
-/// as this name is used for testing.
-#[rocket::async_test]
-async fn prepare_test() {
-    let client = spawn_client().await;
-
-    let response = check_game(&client, TEST_GAME_NAME).await;
-    assert!(
-        response.is_err(),
-        "Please delete a game called \'{}\' from the database for testing purposes",
-        TEST_GAME_NAME
-    );
-}
-
-/// Deletes an unexisting game
-#[rocket::async_test]
-async fn delete_unexistent() {
-    let client = spawn_client().await;
-
-    let response = delete_game(&client, TEST_GAME_NAME).await;
-    assert!(response.is_err());
-}
-
 /// Creates and deletes a game in the database
 #[rocket::async_test]
 async fn create_delete_game() {
@@ -118,19 +105,11 @@ async fn create_delete_game() {
 
     // Create a game
     let game_name = TEST_GAME_NAME.to_owned();
-    let game_id = create_game(&client, &game_name).await.unwrap();
-
-    // Check game
-    let response = check_game(&client, &game_name).await;
-    assert_eq!(response, Ok(game_id));
+    let (_, game_keys) = create_game(&client, &game_name).await.unwrap();
 
     // Delete the game
-    let response = delete_game(&client, &game_name).await;
+    let response = delete_game(&client, &game_name, game_keys.admin_key.inner()).await;
     assert_eq!(response, Ok(0));
-
-    // Check that the game was deleted
-    let response = check_game(&client, &game_name).await;
-    assert!(response.is_err());
 }
 
 /// Creates a game, adds score, and deletes the game from the database
@@ -140,19 +119,21 @@ async fn create_add_delete_game() {
 
     // Create a game
     let game_name = TEST_GAME_NAME.to_owned();
-    let game_id = create_game(&client, &game_name).await.unwrap();
-
-    // Check game
-    let response = check_game(&client, &game_name).await;
-    assert_eq!(response, Ok(game_id));
+    let (_, game_keys) = create_game(&client, &game_name).await.unwrap();
 
     // Add score
     let score_record = ScoreRecord::new(10, None);
-    let response = add_score(&client, &game_name, &score_record).await;
+    let response = add_score(
+        &client,
+        &game_name,
+        &score_record,
+        game_keys.write_key.inner(),
+    )
+    .await;
     assert!(response.is_ok());
 
     // Delete the game
-    let response = delete_game(&client, &game_name).await;
+    let response = delete_game(&client, &game_name, game_keys.admin_key.inner()).await;
     assert_eq!(response, Ok(1));
 }
 
@@ -163,11 +144,7 @@ async fn create_add_get_delete_game() {
 
     // Create a game
     let game_name = TEST_GAME_NAME.to_owned();
-    let game_id = create_game(&client, &game_name).await.unwrap();
-
-    // Check game
-    let response = check_game(&client, &game_name).await;
-    assert_eq!(response, Ok(game_id));
+    let (_, game_keys) = create_game(&client, &game_name).await.unwrap();
 
     // Add scores
     let scores = vec![
@@ -177,15 +154,21 @@ async fn create_add_get_delete_game() {
     ];
     let scores_len = scores.len();
     for score_record in &scores {
-        let response = add_score(&client, &game_name, &score_record).await;
+        let response = add_score(
+            &client,
+            &game_name,
+            &score_record,
+            game_keys.admin_key.inner(),
+        )
+        .await;
         assert!(response.is_ok());
     }
 
     // Fetch score
-    let response = get_scores(&client, &game_name).await;
+    let response = get_scores(&client, &game_name, game_keys.read_key.inner()).await;
     assert_eq!(response, Ok(scores));
 
     // Delete the game
-    let response = delete_game(&client, &game_name).await;
+    let response = delete_game(&client, &game_name, game_keys.admin_key.inner()).await;
     assert_eq!(response, Ok(scores_len as u64));
 }
