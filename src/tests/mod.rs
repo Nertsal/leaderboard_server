@@ -20,55 +20,56 @@ async fn deserialize_response<'a, T: rocket::serde::DeserializeOwned>(
 
 /// Checks whether a game called `game_name` exists in the database
 /// and return Some(game_id) if it does.
-async fn check_game(client: &Client, game_name: &str) -> Option<GameId> {
+async fn check_game(client: &Client, game_name: &str) -> Result<GameId, String> {
     let uri = format!("/games/{}", game_name);
     let response = client.get(&uri).dispatch().await;
-    assert_eq!(response.status(), Status::Ok);
-    deserialize_response::<GameId>(response)
-        .await
-        .map(|id| Some(id))
-        .unwrap_or_default()
+    if response.status() != Status::Ok {
+        return Err(response.into_string().await.unwrap());
+    }
+
+    let game_id = deserialize_response::<GameId>(response).await.unwrap();
+    Ok(game_id)
 }
 
 /// Creates a new game called `game_name` in the database
 /// and returns its generated id
-async fn create_game(client: &Client, game_name: &String) -> Option<GameId> {
+async fn create_game(client: &Client, game_name: &String) -> Result<GameId, String> {
     let response = client.post("/games").json(game_name).dispatch().await;
     if response.status() != Status::Ok {
-        return None;
+        return Err(response.into_string().await.unwrap());
     }
 
-    deserialize_response::<GameId>(response)
-        .await
-        .map(|id| Some(id))
-        .unwrap_or_default()
+    let game_id = deserialize_response::<GameId>(response).await.unwrap();
+    Ok(game_id)
 }
 
 /// Deletes a game called `game_name` from the database
 /// and returns whether it was in the database
-async fn delete_game(client: &Client, game_name: &str) -> Option<u64> {
+async fn delete_game(client: &Client, game_name: &str) -> Result<u64, String> {
     let uri = format!("/games/{}", game_name);
     let response = client.delete(&uri).dispatch().await;
     if response.status() != Status::Ok {
-        return None;
+        return Err(response.into_string().await.unwrap());
     }
 
-    deserialize_response::<u64>(response)
-        .await
-        .map(|rows| Some(rows))
-        .unwrap_or_default()
+    let score_count = deserialize_response::<u64>(response).await.unwrap();
+    Ok(score_count)
 }
 
 /// Add score to the database under game called `game_name`.
 /// Returns false if such game does not exist.
-async fn add_score(client: &Client, game_name: &str, score_record: &ScoreRecord) -> bool {
+async fn add_score(
+    client: &Client,
+    game_name: &str,
+    score_record: &ScoreRecord,
+) -> Result<(), String> {
     let uri = format!("/games/{}/scores", game_name);
     let response = client.post(&uri).json(score_record).dispatch().await;
     if response.status() != Status::Ok {
-        return false;
+        return Err(response.into_string().await.unwrap());
     }
 
-    true
+    Ok(())
 }
 
 async fn get_scores(client: &Client, game_name: &str) -> Result<Vec<ScoreRecord>, String> {
@@ -94,8 +95,8 @@ async fn prepare_test() {
     let client = spawn_client().await;
 
     let response = check_game(&client, TEST_GAME_NAME).await;
-    assert_eq!(
-        response, None,
+    assert!(
+        response.is_err(),
         "Please delete a game called \'{}\' from the database for testing purposes",
         TEST_GAME_NAME
     );
@@ -107,7 +108,7 @@ async fn delete_unexistent() {
     let client = spawn_client().await;
 
     let response = delete_game(&client, TEST_GAME_NAME).await;
-    assert_eq!(response, None);
+    assert!(response.is_err());
 }
 
 /// Creates and deletes a game in the database
@@ -120,11 +121,12 @@ async fn create_delete_game() {
     let game_id = create_game(&client, &game_name).await.unwrap();
 
     // Check game
-    assert_eq!(check_game(&client, &game_name).await, Some(game_id));
+    let response = check_game(&client, &game_name).await;
+    assert_eq!(response, Ok(game_id));
 
     // Delete the game
     let response = delete_game(&client, &game_name).await;
-    assert_eq!(response, Some(0));
+    assert_eq!(response, Ok(0));
 }
 
 /// Creates a game, adds score, and deletes the game from the database
@@ -137,16 +139,17 @@ async fn create_add_delete_game() {
     let game_id = create_game(&client, &game_name).await.unwrap();
 
     // Check game
-    assert_eq!(check_game(&client, &game_name).await, Some(game_id));
+    let response = check_game(&client, &game_name).await;
+    assert_eq!(response, Ok(game_id));
 
     // Add score
     let score_record = ScoreRecord { score: 10 };
     let response = add_score(&client, &game_name, &score_record).await;
-    assert!(response);
+    assert!(response.is_ok());
 
     // Delete the game
     let response = delete_game(&client, &game_name).await;
-    assert_eq!(response, Some(1));
+    assert_eq!(response, Ok(1));
 }
 
 /// Creates a game, adds score, fetches score, and deletes the game from the database
@@ -159,12 +162,13 @@ async fn create_add_get_delete_game() {
     let game_id = create_game(&client, &game_name).await.unwrap();
 
     // Check game
-    assert_eq!(check_game(&client, &game_name).await, Some(game_id));
+    let response = check_game(&client, &game_name).await;
+    assert_eq!(response, Ok(game_id));
 
     // Add score
     let score_record = ScoreRecord { score: 10 };
     let response = add_score(&client, &game_name, &score_record).await;
-    assert!(response);
+    assert!(response.is_ok());
 
     // Fetch score
     let scores = get_scores(&client, &game_name).await;
@@ -172,5 +176,5 @@ async fn create_add_get_delete_game() {
 
     // Delete the game
     let response = delete_game(&client, &game_name).await;
-    assert_eq!(response, Some(1));
+    assert_eq!(response, Ok(1));
 }

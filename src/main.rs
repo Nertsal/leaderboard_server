@@ -73,9 +73,12 @@ fn index() -> &'static str {
 }
 
 /// Checks whether a game called `game_name` is registered in the database.
-/// Returns Some(game_id) if it does, else None.
+/// Returns Ok(game_id) if it does, else Err(_).
 #[get("/games/<game_name>", format = "json")]
-pub async fn check_game(game_name: &str, database: &State<DatabasePool>) -> Json<Option<GameId>> {
+pub async fn check_game(
+    game_name: &str,
+    database: &State<DatabasePool>,
+) -> RequestResult<Json<GameId>> {
     // Check that a game with such name does not exist
     let response = sqlx::query(&format!(
         "SELECT game_id FROM games WHERE game_name = \'{}\'",
@@ -85,7 +88,16 @@ pub async fn check_game(game_name: &str, database: &State<DatabasePool>) -> Json
     .await
     .unwrap();
 
-    Json(response.map(|row| row.get_unchecked::<GameId, usize>(0)))
+    match response {
+        Some(response) => {
+            let game_id = response.get_unchecked::<GameId, usize>(0);
+            Ok(Json(game_id))
+        }
+        None => Err(RequestError::NoSuchGame {
+            game_name: game_name.to_owned(),
+        }
+        .into()),
+    }
 }
 
 /// Attempts to add a new game called `game_name` into the database.
@@ -100,7 +112,7 @@ pub async fn add_game(
 
     // Check that a game with such name does not exist
     let check = check_game(&game_name, database).await;
-    if check.is_some() {
+    if check.is_ok() {
         return Err(RequestError::GameAlreadyExists { game_name }.into());
     }
 
@@ -114,7 +126,6 @@ pub async fn add_game(
     .unwrap();
 
     let id = response.get_unchecked::<GameId, usize>(0);
-
     Ok(Json(id))
 }
 
@@ -126,7 +137,7 @@ pub async fn add_game(
 pub async fn delete_game(
     game_name: &str,
     database: &State<DatabasePool>,
-) -> RequestResult<Json<Option<u64>>> {
+) -> RequestResult<Json<u64>> {
     // Delete game from the the `games` table
     let response = sqlx::query(&format!(
         "DELETE FROM games WHERE game_name = \'{}\' RETURNING game_id",
@@ -140,7 +151,10 @@ pub async fn delete_game(
     let game_id = match response {
         Some(response) => response.get_unchecked::<GameId, usize>(0),
         None => {
-            return Ok(Json(None));
+            return Err(RequestError::NoSuchGame {
+                game_name: game_name.to_owned(),
+            }
+            .into());
         }
     };
 
@@ -151,7 +165,7 @@ pub async fn delete_game(
         .unwrap();
 
     let rows_affected = response.rows_affected();
-    Ok(Json(Some(rows_affected)))
+    Ok(Json(rows_affected))
 }
 
 /// Adds score to the database under game called `game_name`
@@ -164,16 +178,8 @@ pub async fn add_score(
     let score_record = score_record.0;
 
     // Get game's id
-    let response = check_game(game_name, database).await;
-    let game_id = match response.0 {
-        Some(game_id) => game_id,
-        None => {
-            return Err(RequestError::NoSuchGame {
-                game_name: game_name.to_owned(),
-            }
-            .into())
-        }
-    };
+    let response = check_game(game_name, database).await?;
+    let game_id = response.0;
 
     // Insert score
     sqlx::query(&format!(
@@ -196,16 +202,8 @@ pub async fn get_scores(
     database: &State<DatabasePool>,
 ) -> RequestResult<Json<Vec<ScoreRecord>>> {
     // Check that the game exists
-    let response = check_game(game_name, database).await;
-    let game_id = match response.0 {
-        Some(game_id) => game_id,
-        None => {
-            return Err(RequestError::NoSuchGame {
-                game_name: game_name.to_owned(),
-            }
-            .into());
-        }
-    };
+    let response = check_game(game_name, database).await?;
+    let game_id = response.0;
 
     // Fetch scores
     let response = sqlx::query(&format!(
