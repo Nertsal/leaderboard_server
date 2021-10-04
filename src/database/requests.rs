@@ -10,6 +10,21 @@ pub enum AuthorityLevel {
     Admin,
 }
 
+impl AuthorityLevel {
+    /// Returns Ok(()) if authority matched,
+    /// Err(Unathorized) if authority is Unathorized,
+    /// Err(Forbidden) otherwise.
+    fn check_authority(self, required: Self) -> RequestResult<()> {
+        if let Self::Unathorizied = self {
+            return Err(RequestError::Unathorized);
+        }
+        if self < required {
+            return Err(RequestError::Forbidden);
+        }
+        Ok(())
+    }
+}
+
 /// Checks whether a game called `game_name` is registered in the database.
 /// Returns game id and authority level associated with the key if the game does exist.
 pub async fn check_game(
@@ -52,8 +67,7 @@ pub async fn check_game(
         }
         None => Err(RequestError::NoSuchGame {
             game_name: game_name.to_owned(),
-        }
-        .into()),
+        }),
     }
 }
 
@@ -68,8 +82,7 @@ pub async fn create_game(
     if game_name.is_empty() {
         return Err(RequestError::InvalidGameName {
             game_name: game_name.to_owned(),
-        }
-        .into());
+        });
     }
 
     // Check that a game with such name does not exist
@@ -77,8 +90,7 @@ pub async fn create_game(
     if check.is_ok() {
         return Err(RequestError::GameAlreadyExists {
             game_name: game_name.to_owned(),
-        }
-        .into());
+        });
     }
 
     // Generate keys
@@ -109,9 +121,7 @@ pub async fn delete_game(
 ) -> RequestResult<Json<u64>> {
     // Check that the api_key is admin level
     let (game_id, authority_level) = check_game(game_name, Some(api_key), database).await?;
-    if authority_level < AuthorityLevel::Admin {
-        return Err(RequestError::Unathorized.into());
-    }
+    authority_level.check_authority(AuthorityLevel::Admin)?;
 
     // Delete game from the the `games` table
     sqlx::query(&format!("DELETE FROM games WHERE game_id = {}", game_id))
@@ -148,9 +158,7 @@ pub async fn add_score(
     let (game_id, authority_level) = check_game(game_name, Some(api_key), database).await?;
 
     // Check authority
-    if authority_level < AuthorityLevel::Write {
-        return Err(RequestError::Unathorized.into());
-    }
+    authority_level.check_authority(AuthorityLevel::Write)?;
 
     // Insert score
     let extra_info = match score_record.extra_info {
@@ -181,9 +189,7 @@ pub async fn get_scores(
     let (game_id, authority_level) = check_game(game_name, Some(api_key), database).await?;
 
     // Check authority_level
-    if authority_level < AuthorityLevel::Read {
-        return Err(RequestError::Unathorized.into());
-    }
+    authority_level.check_authority(AuthorityLevel::Read)?;
 
     // Fetch scores
     let response = sqlx::query(&format!(
