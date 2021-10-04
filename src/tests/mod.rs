@@ -147,7 +147,7 @@ async fn create_add_delete_game() {
     assert_eq!(response, Ok(game_id));
 
     // Add score
-    let score_record = ScoreRecord { score: 10 };
+    let score_record = ScoreRecord::new(10, None);
     let response = add_score(&client, &game_name, &score_record).await;
     assert!(response.is_ok());
 
@@ -171,9 +171,9 @@ async fn create_add_get_delete_game() {
 
     // Add scores
     let scores = vec![
-        ScoreRecord { score: 10 },
-        ScoreRecord { score: -5 },
-        ScoreRecord { score: 31 },
+        ScoreRecord::new(10, None),
+        ScoreRecord::new(-3, Some("good guy".to_owned())),
+        ScoreRecord::new(31, None),
     ];
     let scores_len = scores.len();
     for score_record in &scores {

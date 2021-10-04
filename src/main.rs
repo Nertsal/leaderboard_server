@@ -182,9 +182,13 @@ pub async fn add_score(
     let game_id = response.0;
 
     // Insert score
+    let extra_info = match score_record.extra_info {
+        Some(extra_info) => format!("\'{}\'", extra_info),
+        None => format!("null"),
+    };
     sqlx::query(&format!(
-        "INSERT INTO scores (game_id, score) VALUES ({}, {})",
-        game_id, score_record.score
+        "INSERT INTO scores (game_id, score, extra_info) VALUES ({}, {}, {})",
+        game_id, score_record.score, extra_info
     ))
     .execute(database.inner())
     .await
@@ -207,7 +211,7 @@ pub async fn get_scores(
 
     // Fetch scores
     let response = sqlx::query(&format!(
-        "SELECT score FROM scores WHERE game_id = {}",
+        "SELECT score, extra_info FROM scores WHERE game_id = {}",
         game_id
     ))
     .fetch_all(database.inner())
@@ -218,7 +222,8 @@ pub async fn get_scores(
         .into_iter()
         .map(|row| {
             let score = row.get_unchecked::<GameScore, usize>(0);
-            ScoreRecord { score }
+            let extra_info = row.get_unchecked::<Option<String>, usize>(1);
+            ScoreRecord::new(score, extra_info)
         })
         .collect();
 

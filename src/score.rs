@@ -15,4 +15,11 @@ pub type GameScore = i32;
 #[serde(crate = "rocket::serde")]
 pub struct ScoreRecord {
     pub score: GameScore,
+    pub extra_info: Option<String>,
+}
+
+impl ScoreRecord {
+    pub fn new(score: GameScore, extra_info: Option<String>) -> Self {
+        Self { score, extra_info }
+    }
 }
