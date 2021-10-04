@@ -60,13 +60,11 @@ pub async fn check_game(
 /// Attempts to add a new game called `game_name` into the database.
 /// Returns an error if such game is already in the database,
 /// otherwise returns the new game's id.
-#[post("/games", data = "<game_name>", format = "json")]
+#[post("/games", data = "<game_name>")]
 pub async fn create_game(
-    game_name: Json<String>,
+    game_name: &str,
     database: &State<DatabasePool>,
 ) -> RequestResult<Json<(GameId, GameKeys)>> {
-    let game_name = game_name.0;
-
     if game_name.is_empty() {
         return Err(RequestError::InvalidGameName {
             game_name: game_name.to_owned(),

@@ -24,7 +24,7 @@ async fn deserialize_response<'a, T: rocket::serde::DeserializeOwned>(
 /// Creates a new game called `game_name` in the database
 /// and returns its generated id
 async fn create_game(client: &Client, game_name: &String) -> Result<(GameId, GameKeys), String> {
-    let response = client.post("/games").json(game_name).dispatch().await;
+    let response = client.post("/games").body(game_name).dispatch().await;
     if response.status() != Status::Ok {
         return Err(response.into_string().await.unwrap());
     }
