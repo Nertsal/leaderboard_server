@@ -9,8 +9,10 @@ use rocket::serde::{Deserialize, Serialize};
 // &'r str
 // String
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+pub type GameScore = i32;
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(crate = "rocket::serde")]
-pub struct GameScore {
-    pub score: i32,
+pub struct ScoreRecord {
+    pub score: GameScore,
 }

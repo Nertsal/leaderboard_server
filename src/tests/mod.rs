@@ -3,7 +3,7 @@ use rocket::{
     local::asynchronous::{Client, LocalResponse},
 };
 
-use crate::{score::GameScore, GameId};
+use crate::{score::ScoreRecord, GameId};
 
 async fn spawn_client() -> Client {
     Client::tracked(super::rocket().await)
@@ -61,14 +61,27 @@ async fn delete_game(client: &Client, game_name: &str) -> Option<u64> {
 
 /// Add score to the database under game called `game_name`.
 /// Returns false if such game does not exist.
-async fn add_score(client: &Client, game_name: &str, score: &GameScore) -> bool {
-    let uri = format!("/games/{}", game_name);
-    let response = client.post(&uri).json(score).dispatch().await;
+async fn add_score(client: &Client, game_name: &str, score_record: &ScoreRecord) -> bool {
+    let uri = format!("/games/{}/scores", game_name);
+    let response = client.post(&uri).json(score_record).dispatch().await;
     if response.status() != Status::Ok {
         return false;
     }
 
     true
+}
+
+async fn get_scores(client: &Client, game_name: &str) -> Result<Vec<ScoreRecord>, String> {
+    let uri = format!("/games/{}/scores", game_name);
+    let response = client.get(&uri).dispatch().await;
+    if response.status() != Status::Ok {
+        return Err(response.into_string().await.unwrap());
+    }
+
+    let scores = deserialize_response::<Vec<ScoreRecord>>(response)
+        .await
+        .unwrap();
+    Ok(scores)
 }
 
 const TEST_GAME_NAME: &'static str = "test_game";
@@ -114,7 +127,7 @@ async fn create_delete_game() {
     assert_eq!(response, Some(0));
 }
 
-/// Creates and deletes a game in the database
+/// Creates a game, adds score, and deletes the game from the database
 #[rocket::async_test]
 async fn create_add_delete_game() {
     let client = spawn_client().await;
@@ -127,9 +140,35 @@ async fn create_add_delete_game() {
     assert_eq!(check_game(&client, &game_name).await, Some(game_id));
 
     // Add score
-    let score = GameScore { score: 10 };
-    let response = add_score(&client, &game_name, &score).await;
+    let score_record = ScoreRecord { score: 10 };
+    let response = add_score(&client, &game_name, &score_record).await;
     assert!(response);
+
+    // Delete the game
+    let response = delete_game(&client, &game_name).await;
+    assert_eq!(response, Some(1));
+}
+
+/// Creates a game, adds score, fetches score, and deletes the game from the database
+#[rocket::async_test]
+async fn create_add_get_delete_game() {
+    let client = spawn_client().await;
+
+    // Create a game
+    let game_name = TEST_GAME_NAME.to_owned();
+    let game_id = create_game(&client, &game_name).await.unwrap();
+
+    // Check game
+    assert_eq!(check_game(&client, &game_name).await, Some(game_id));
+
+    // Add score
+    let score_record = ScoreRecord { score: 10 };
+    let response = add_score(&client, &game_name, &score_record).await;
+    assert!(response);
+
+    // Fetch score
+    let scores = get_scores(&client, &game_name).await;
+    assert_eq!(scores, Ok(vec![score_record]));
 
     // Delete the game
     let response = delete_game(&client, &game_name).await;

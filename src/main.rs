@@ -3,6 +3,8 @@ use rocket::*;
 use score::GameScore;
 use sqlx::Row;
 
+use crate::score::ScoreRecord;
+
 mod score;
 #[cfg(test)]
 mod tests;
@@ -53,7 +55,14 @@ async fn rocket() -> _ {
     rocket::build()
         .mount(
             "/",
-            routes![index, check_game, add_game, delete_game, add_score],
+            routes![
+                index,
+                check_game,
+                add_game,
+                delete_game,
+                add_score,
+                get_scores
+            ],
         )
         .manage::<DatabasePool>(database_pool)
 }
@@ -146,13 +155,13 @@ pub async fn delete_game(
 }
 
 /// Adds score to the database under game called `game_name`
-#[post("/games/<game_name>", format = "json", data = "<score>")]
+#[post("/games/<game_name>/scores", format = "json", data = "<score_record>")]
 pub async fn add_score(
     game_name: &str,
-    score: Json<GameScore>,
+    score_record: Json<ScoreRecord>,
     database: &State<DatabasePool>,
 ) -> RequestResult<()> {
-    let score = score.0;
+    let score_record = score_record.0;
 
     // Get game's id
     let response = check_game(game_name, database).await;
@@ -169,11 +178,51 @@ pub async fn add_score(
     // Insert score
     sqlx::query(&format!(
         "INSERT INTO scores (game_id, score) VALUES ({}, {})",
-        game_id, score.score
+        game_id, score_record.score
     ))
     .execute(database.inner())
     .await
     .unwrap();
 
     Ok(())
+}
+
+/// Fetches scores for a specific game from the `scores` database.
+/// Returns an error if such game is not registered,
+/// otherwise returns a vector of scores.
+#[get("/games/<game_name>/scores", format = "json")]
+pub async fn get_scores(
+    game_name: &str,
+    database: &State<DatabasePool>,
+) -> RequestResult<Json<Vec<ScoreRecord>>> {
+    // Check that the game exists
+    let response = check_game(game_name, database).await;
+    let game_id = match response.0 {
+        Some(game_id) => game_id,
+        None => {
+            return Err(RequestError::NoSuchGame {
+                game_name: game_name.to_owned(),
+            }
+            .into());
+        }
+    };
+
+    // Fetch scores
+    let response = sqlx::query(&format!(
+        "SELECT score FROM scores WHERE game_id = {}",
+        game_id
+    ))
+    .fetch_all(database.inner())
+    .await
+    .unwrap();
+
+    let scores = response
+        .into_iter()
+        .map(|row| {
+            let score = row.get_unchecked::<GameScore, usize>(0);
+            ScoreRecord { score }
+        })
+        .collect();
+
+    Ok(Json(scores))
 }
