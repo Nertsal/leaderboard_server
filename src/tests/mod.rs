@@ -24,7 +24,11 @@ async fn deserialize_response<'a, T: rocket::serde::DeserializeOwned>(
 /// Creates a new game called `game_name` in the database
 /// and returns its generated id
 async fn create_game(client: &Client, game_name: &String) -> Result<(GameId, GameKeys), String> {
-    let response = client.post("/games").body(game_name).dispatch().await;
+    let response = client
+        .post("/games/create")
+        .body(game_name)
+        .dispatch()
+        .await;
     if response.status() != Status::Ok {
         return Err(response.into_string().await.unwrap());
     }
@@ -60,7 +64,7 @@ async fn add_score(
     score_record: &ScoreRecord,
     api_key: &str,
 ) -> Result<(), String> {
-    let uri = format!("/games/{}/scores", game_name);
+    let uri = format!("/games/{}/leaderboard", game_name);
     let response = client
         .post(&uri)
         .header(Header::new("api-key", api_key.to_owned()))
@@ -80,7 +84,7 @@ async fn get_scores(
     game_name: &str,
     api_key: &str,
 ) -> Result<Vec<ScoreRecord>, String> {
-    let uri = format!("/games/{}/scores", game_name);
+    let uri = format!("/games/{}/leaderboard", game_name);
     let response = client
         .get(&uri)
         .header(Header::new("api-key", api_key.to_owned()))

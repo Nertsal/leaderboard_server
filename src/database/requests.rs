@@ -60,7 +60,7 @@ pub async fn check_game(
 /// Attempts to add a new game called `game_name` into the database.
 /// Returns an error if such game is already in the database,
 /// otherwise returns the new game's id.
-#[post("/games", data = "<game_name>")]
+#[post("/games/create", data = "<game_name>")]
 pub async fn create_game(
     game_name: &str,
     database: &State<DatabasePool>,
@@ -131,7 +131,11 @@ pub async fn delete_game(
 
 /// Adds score to the database under game called `game_name`ю
 /// Returns an error if a game with such name already existed.
-#[post("/games/<game_name>/scores", format = "json", data = "<score_record>")]
+#[post(
+    "/games/<game_name>/leaderboard",
+    format = "json",
+    data = "<score_record>"
+)]
 pub async fn add_score(
     game_name: &str,
     score_record: Json<ScoreRecord>,
@@ -167,7 +171,7 @@ pub async fn add_score(
 /// Fetches scores for a specific game from the `scores` database.
 /// Returns an error if such game is not registered,
 /// otherwise returns a vector of scores.
-#[get("/games/<game_name>/scores", format = "json")]
+#[get("/games/<game_name>/leaderboard", format = "json")]
 pub async fn get_scores(
     game_name: &str,
     api_key: ApiKey<'_>,
